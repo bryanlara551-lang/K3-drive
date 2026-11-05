@@ -1,0 +1,192 @@
+package com.k3drive.ui
+
+import android.widget.Toast
+import androidx.compose.foundation.*
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.grid.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Text
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import java.time.format.DateTimeFormatter
+import java.util.Locale
+
+private val timeFmt = DateTimeFormatter.ofPattern("HH:mm")
+private val dateFmt = DateTimeFormatter.ofPattern("EEEE d 'de' MMMM", Locale("es"))
+
+@Composable
+fun Dashboard(vm: DashboardViewModel) {
+    val s by vm.state.collectAsStateWithLifecycle()
+    val ctx = LocalContext.current
+    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Bg, Bg2)))) {
+        Column(
+            Modifier.fillMaxSize().systemBarsPadding().padding(horizontal = 24.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            TopBar(s, vm)
+            Row(
+                Modifier.weight(1f).fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.Center) {
+                    Speedo(s.speedKmh, Modifier.fillMaxSize())
+                }
+                Column(Modifier.weight(1.5f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Car(Modifier.fillMaxWidth())
+                    Instruments(s)
+                }
+                MediaCard(Modifier.weight(1f))
+            }
+            Shortcuts(s, vm) { app ->
+                val it = app.intent
+                if (it == null) Toast.makeText(ctx, "${app.def.label} no está instalada", Toast.LENGTH_SHORT).show()
+                else runCatching { ctx.startActivity(it.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                    .onFailure { Toast.makeText(ctx, "No se pudo abrir ${app.def.label}", Toast.LENGTH_SHORT).show() }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TopBar(s: UiState, vm: DashboardViewModel) {
+    val ctx = LocalContext.current
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(s.now.format(timeFmt), fontSize = 44.sp, fontWeight = FontWeight.Light, color = Color.White)
+        Spacer(Modifier.width(16.dp))
+        Column {
+            Text(s.now.format(dateFmt).replaceFirstChar { it.uppercase() }, fontSize = 15.sp, color = Color.White)
+            Text(
+                s.weather?.let { "${it.tempC}°C · ${it.description}" } ?: "Clima: No disponible",
+                fontSize = 13.sp, color = Dim
+            )
+        }
+        Spacer(Modifier.weight(1f))
+        Chip(
+            when (s.bluetooth) { true -> "Bluetooth: conectado"; false -> "Bluetooth: sin conexión"; null -> "Bluetooth: No disponible" },
+            if (s.bluetooth == true) Electric else Dim
+        )
+        Spacer(Modifier.width(10.dp))
+        Chip("Batería ${s.battery.percent}%" + if (s.battery.charging) " ⚡" else "", if (s.battery.percent > 20) Electric else Color(0xFFFF5252))
+        Spacer(Modifier.width(14.dp))
+        Box(
+            Modifier.size(56.dp).clip(CircleShape).background(Panel)
+                .clickable { Toast.makeText(ctx, "NEX (voz) se activa en la Fase 2", Toast.LENGTH_SHORT).show() },
+            contentAlignment = Alignment.Center
+        ) {
+            RainbowRing(Modifier.fillMaxSize())
+            Text("NEX", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+        }
+    }
+}
+
+@Composable
+private fun Chip(text: String, color: Color) {
+    Text(
+        text, fontSize = 13.sp, color = color,
+        modifier = Modifier.clip(RoundedCornerShape(50)).background(Panel)
+            .border(1.dp, color.copy(alpha = 0.4f), RoundedCornerShape(50))
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+    )
+}
+
+@Composable
+private fun Instruments(s: UiState) {
+    val h = s.tripSeconds / 3600; val m = (s.tripSeconds % 3600) / 60
+    val items = listOf(
+        "Distancia" to String.format(Locale.US, "%.1f km", s.tripKm),
+        "Tiempo" to String.format(Locale.US, "%d:%02d h", h, m),
+        "RPM" to "No disponible",
+        "Odómetro" to "No disponible",
+        "Combustible" to "No disponible",
+        "Temp. motor" to "No disponible",
+    )
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        items.chunked(3).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                row.forEach { (k, v) ->
+                    Column(
+                        Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).background(Panel).padding(8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(k, fontSize = 11.sp, color = Dim)
+                        Text(v, fontSize = 13.sp, color = if (v == "No disponible") Dim else Color.White, textAlign = TextAlign.Center)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MediaCard(modifier: Modifier) {
+    Column(
+        modifier.clip(RoundedCornerShape(20.dp)).background(Panel).border(1.dp, Electric.copy(alpha = 0.25f), RoundedCornerShape(20.dp)).padding(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center
+    ) {
+        Text("MULTIMEDIA", fontSize = 12.sp, color = Electric, letterSpacing = 2.sp)
+        Spacer(Modifier.height(8.dp))
+        Text("Sin sesión de reproducción", fontSize = 14.sp, color = Color.White, textAlign = TextAlign.Center)
+        Text("El control de Apple Music, Spotify y YouTube Music llega en la Fase 3.", fontSize = 11.sp, color = Dim, textAlign = TextAlign.Center)
+    }
+}
+
+@Composable
+private fun Shortcuts(s: UiState, vm: DashboardViewModel, onOpen: (com.k3drive.data.ResolvedApp) -> Unit) {
+    val list = if (s.editMode) s.apps else s.apps.filter { it.visible }
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("ACCESOS", fontSize = 12.sp, color = Dim, letterSpacing = 2.sp)
+            Spacer(Modifier.weight(1f))
+            Text(
+                if (s.editMode) "Listo" else "Personalizar", fontSize = 13.sp, color = Electric,
+                modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { vm.toggleEdit() }.padding(horizontal = 10.dp, vertical = 4.dp)
+            )
+        }
+        LazyVerticalGrid(
+            GridCells.Fixed(5), Modifier.fillMaxWidth().height(if (s.editMode) 220.dp else 150.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp),
+            userScrollEnabled = s.editMode
+        ) {
+            items(list, key = { it.app.def.id }) { ua ->
+                val a = ua.app
+                val installed = a.intent != null
+                Column(
+                    Modifier.fillMaxWidth().height(if (s.editMode) 100.dp else 70.dp)
+                        .alpha(if (installed && ua.visible) 1f else 0.4f)
+                        .clip(RoundedCornerShape(16.dp)).background(Panel)
+                        .border(1.dp, Electric.copy(alpha = if (installed) 0.35f else 0.1f), RoundedCornerShape(16.dp))
+                        .clickable(enabled = !s.editMode) { onOpen(a) },
+                    horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (a.icon != null) Image(a.icon, a.def.label, Modifier.size(32.dp).clip(RoundedCornerShape(8.dp)))
+                        else Box(Modifier.size(32.dp).clip(CircleShape).background(Color(0xFF1B2330)), contentAlignment = Alignment.Center) {
+                            Text(a.def.label.take(1), color = Dim)
+                        }
+                    }
+                    Text(a.def.label, fontSize = 12.sp, color = Color.White, maxLines = 1)
+                    if (s.editMode) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("◀", color = Electric, fontSize = 16.sp, modifier = Modifier.clickable { vm.moveEarlier(a.def.id) }.padding(6.dp))
+                            Text(if (ua.visible) "Ocultar" else "Mostrar", color = Electric, fontSize = 12.sp,
+                                modifier = Modifier.clickable { vm.toggleVisible(a.def.id) }.padding(6.dp))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

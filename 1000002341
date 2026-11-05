@@ -1,0 +1,87 @@
+package com.k3drive.data
+
+import android.Manifest
+import android.annotation.SuppressLint
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothProfile
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.content.pm.PackageManager
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
+import android.os.BatteryManager
+import android.os.Looper
+import androidx.core.content.ContextCompat
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.launch
+
+fun Context.hasPerm(p: String) = ContextCompat.checkSelfPermission(this, p) == PackageManager.PERMISSION_GRANTED
+
+/** Fixes GPS de la tablet (fuente primaria de velocidad). */
+@SuppressLint("MissingPermission")
+fun locationFlow(ctx: Context): Flow<Location> = callbackFlow {
+    val lm = ctx.getSystemService(LocationManager::class.java)
+    val listener = LocationListener { trySend(it) }
+    try {
+        lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, listener, Looper.getMainLooper())
+    } catch (e: Exception) { close(e) }
+    awaitClose { lm.removeUpdates(listener) }
+}
+
+@SuppressLint("MissingPermission")
+fun lastKnownLocation(ctx: Context): Location? {
+    if (!ctx.hasPerm(Manifest.permission.ACCESS_FINE_LOCATION) && !ctx.hasPerm(Manifest.permission.ACCESS_COARSE_LOCATION)) return null
+    val lm = ctx.getSystemService(LocationManager::class.java)
+    return runCatching {
+        lm.getProviders(true).mapNotNull { lm.getLastKnownLocation(it) }.maxByOrNull { it.time }
+    }.getOrNull()
+}
+
+data class BatteryInfo(val percent: Int, val charging: Boolean)
+
+fun batteryFlow(ctx: Context): Flow<BatteryInfo> = callbackFlow {
+    fun parse(i: Intent): BatteryInfo {
+        val level = i.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
+        val scale = i.getIntExtra(BatteryManager.EXTRA_SCALE, 100)
+        val st = i.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
+        val ch = st == BatteryManager.BATTERY_STATUS_CHARGING || st == BatteryManager.BATTERY_STATUS_FULL
+        return BatteryInfo(if (level >= 0) level * 100 / scale else 0, ch)
+    }
+    val r = object : BroadcastReceiver() {
+        override fun onReceive(c: Context, i: Intent) { trySend(parse(i)) }
+    }
+    val sticky = ContextCompat.registerReceiver(ctx, r, IntentFilter(Intent.ACTION_BATTERY_CHANGED), ContextCompat.RECEIVER_NOT_EXPORTED)
+    sticky?.let { trySend(parse(it)) }
+    awaitClose { ctx.unregisterReceiver(r) }
+}
+
+/** true/false = estado de audio Bluetooth; null = sin permiso o sin Bluetooth. */
+@SuppressLint("MissingPermission")
+fun bluetoothFlow(ctx: Context): Flow<Boolean?> = callbackFlow {
+    fun query(): Boolean? {
+        if (!ctx.hasPerm(Manifest.permission.BLUETOOTH_CONNECT)) return null
+        val ad = ctx.getSystemService(BluetoothManager::class.java)?.adapter ?: return null
+        return ad.getProfileConnectionState(BluetoothProfile.A2DP) == BluetoothProfile.STATE_CONNECTED ||
+            ad.getProfileConnectionState(BluetoothProfile.HEADSET) == BluetoothProfile.STATE_CONNECTED
+    }
+    trySend(query())
+    val r = object : BroadcastReceiver() {
+        override fun onReceive(c: Context, i: Intent) {
+            launch { delay(1500); trySend(query()) } // el perfil tarda en actualizar
+        }
+    }
+    val f = IntentFilter().apply {
+        addAction(android.bluetooth.BluetoothDevice.ACTION_ACL_CONNECTED)
+        addAction(android.bluetooth.BluetoothDevice.ACTION_ACL_DISCONNECTED)
+        addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
+    }
+    ContextCompat.registerReceiver(ctx, r, f, ContextCompat.RECEIVER_EXPORTED)
+    awaitClose { ctx.unregisterReceiver(r) }
+}

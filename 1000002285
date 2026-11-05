@@ -1,0 +1,24 @@
+# K3 Drive — Fase 1
+
+## Instalación
+1. Instala Android Studio (Koala o más reciente) y abre la carpeta `K3Drive`.
+2. Espera el "Gradle Sync" (descarga Gradle 8.7 y dependencias; requiere Internet).
+3. En la tablet: Ajustes > Acerca de la tablet > Información de software > toca 7 veces "Número de compilación"; luego Opciones de desarrollador > Depuración USB.
+4. Conecta la tablet y pulsa Run, o genera el APK: Build > Build App Bundle(s) / APK(s) > Build APK(s).
+   El APK queda en `app/build/outputs/apk/debug/app-debug.apk`. Cópialo a la tablet e instálalo (permite "orígenes desconocidos").
+
+## Configuración
+Al abrir, concede Ubicación (velocidad GPS) y Bluetooth. Sin ubicación la velocidad muestra "No disponible".
+
+## Implementado (Fase 1)
+- Arquitectura (ViewModel + Room + flujos), tema oscuro/azul eléctrico, pantalla completa horizontal.
+- Dashboard: reloj, fecha, clima (Open-Meteo vía hotspot), batería, estado Bluetooth de audio.
+- Velocímetro con GPS, distancia y tiempo de viaje.
+- Ilustración vectorial propia del sedán Steel Gray.
+- 10 accesos directos: detección de apps instaladas, apertura con intents oficiales,
+  orden y visibilidad personalizables, guardados en Room.
+- RPM, odómetro, combustible y temperatura: "No disponible" (sin fuente real aún).
+
+## Pendiente
+Fase 2 NEX voz · Fase 3 multimedia y modo nocturno · Fase 4 NEX Guard · Fase 5 perfil y rutas · Fase 6 OBD-II.
+Nota: el paquete de DiDi Conductor se detecta por nombre si el ID no coincide; si no aparece, avísame el nombre exacto.

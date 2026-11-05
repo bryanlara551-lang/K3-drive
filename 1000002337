@@ -1,0 +1,21 @@
+package com.k3drive.ui
+
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.graphics.Color
+
+val Bg = Color(0xFF05070A)
+val Bg2 = Color(0xFF0B1018)
+val Panel = Color(0xFF111720)
+val Electric = Color(0xFF00B4FF)
+val Dim = Color(0xFF7C8796)
+val SteelGray = Color(0xFF8A9096)
+
+@Composable
+fun K3Theme(content: @Composable () -> Unit) {
+    MaterialTheme(
+        colorScheme = darkColorScheme(primary = Electric, background = Bg, surface = Panel, onSurface = Color.White),
+        content = content
+    )
+}

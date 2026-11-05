@@ -1,0 +1,33 @@
+package com.k3drive.data
+
+import android.content.Context
+import androidx.room.*
+import kotlinx.coroutines.flow.Flow
+
+@Entity(tableName = "shortcut_pref")
+data class ShortcutPref(@PrimaryKey val id: String, val position: Int, val visible: Boolean = true)
+
+@Dao
+interface ShortcutDao {
+    @Query("SELECT * FROM shortcut_pref ORDER BY position")
+    fun observe(): Flow<List<ShortcutPref>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(list: List<ShortcutPref>)
+
+    @Query("SELECT COUNT(*) FROM shortcut_pref")
+    suspend fun count(): Int
+}
+
+@Database(entities = [ShortcutPref::class], version = 1, exportSchema = false)
+abstract class K3Database : RoomDatabase() {
+    abstract fun shortcuts(): ShortcutDao
+
+    companion object {
+        @Volatile private var instance: K3Database? = null
+        fun get(ctx: Context): K3Database = instance ?: synchronized(this) {
+            instance ?: Room.databaseBuilder(ctx.applicationContext, K3Database::class.java, "k3drive.db")
+                .build().also { instance = it }
+        }
+    }
+}

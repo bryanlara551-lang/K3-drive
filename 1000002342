@@ -1,0 +1,34 @@
+package com.k3drive.data
+
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
+
+data class WeatherInfo(val tempC: Int, val description: String)
+
+/** Open-Meteo: público, sin clave. Requiere Internet (hotspot). */
+suspend fun fetchWeather(lat: Double, lon: Double): WeatherInfo? = withContext(Dispatchers.IO) {
+    runCatching {
+        val url = URL("https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon&current=temperature_2m,weather_code")
+        val c = url.openConnection() as HttpURLConnection
+        c.connectTimeout = 8000; c.readTimeout = 8000
+        val body = c.inputStream.bufferedReader().use { it.readText() }
+        c.disconnect()
+        val cur = JSONObject(body).getJSONObject("current")
+        WeatherInfo(Math.round(cur.getDouble("temperature_2m")).toInt(), describe(cur.getInt("weather_code")))
+    }.getOrNull()
+}
+
+private fun describe(code: Int) = when (code) {
+    0 -> "Despejado"
+    1, 2, 3 -> "Parcialmente nublado"
+    45, 48 -> "Niebla"
+    in 51..57 -> "Llovizna"
+    in 61..67 -> "Lluvia"
+    in 71..77 -> "Nieve"
+    in 80..82 -> "Chubascos"
+    in 95..99 -> "Tormenta"
+    else -> "—"
+}

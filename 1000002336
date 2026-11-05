@@ -1,0 +1,110 @@
+package com.k3drive.ui
+
+import android.Manifest
+import android.app.Application
+import android.location.Location
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import com.k3drive.data.*
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.launch
+import java.time.LocalDateTime
+
+data class UiApp(val app: ResolvedApp, val visible: Boolean)
+
+data class UiState(
+    val now: LocalDateTime = LocalDateTime.now(),
+    val speedKmh: Int? = null,          // null = sin señal GPS -> "No disponible"
+    val tripKm: Double = 0.0,
+    val tripSeconds: Long = 0,
+    val battery: BatteryInfo = BatteryInfo(0, false),
+    val bluetooth: Boolean? = null,
+    val weather: WeatherInfo? = null,
+    val apps: List<UiApp> = emptyList(),
+    val editMode: Boolean = false,
+)
+
+class DashboardViewModel(app: Application) : AndroidViewModel(app) {
+    private val ctx = app.applicationContext
+    private val dao = K3Database.get(ctx).shortcuts()
+    private val resolved = MutableStateFlow<Map<String, ResolvedApp>>(emptyMap())
+    private val _state = MutableStateFlow(UiState())
+    val state: StateFlow<UiState> = _state
+
+    private var sensorJobs: List<Job> = emptyList()
+    private var lastFix = 0L
+    private var prev: Location? = null
+    private var lastLoc: Location? = null
+
+    init {
+        viewModelScope.launch {
+            if (dao.count() == 0) dao.upsertAll(AppCatalog.all.mapIndexed { i, d -> ShortcutPref(d.id, i) })
+        }
+        viewModelScope.launch {
+            combine(dao.observe(), resolved) { prefs, res ->
+                prefs.mapNotNull { p -> res[p.id]?.let { UiApp(it, p.visible) } }
+            }.collect { a -> _state.update { it.copy(apps = a) } }
+        }
+        viewModelScope.launch { // reloj + tiempo de conducción + caducidad de fix GPS
+            while (true) {
+                delay(1000)
+                _state.update { s ->
+                    val stale = System.currentTimeMillis() - lastFix > 5000
+                    val moving = (s.speedKmh ?: 0) > 1
+                    s.copy(
+                        now = LocalDateTime.now(),
+                        speedKmh = if (stale) null else s.speedKmh,
+                        tripSeconds = s.tripSeconds + if (moving && !stale) 1 else 0,
+                    )
+                }
+            }
+        }
+        viewModelScope.launch { // clima cada 15 min (reintenta rápido si falla)
+            while (true) {
+                val loc = lastLoc ?: lastKnownLocation(ctx)
+                val w = loc?.let { fetchWeather(it.latitude, it.longitude) }
+                if (w != null) _state.update { it.copy(weather = w) }
+                delay(if (w != null) 15 * 60_000L else 20_000L)
+            }
+        }
+        viewModelScope.launch { batteryFlow(ctx).collect { b -> _state.update { it.copy(battery = b) } } }
+        viewModelScope.launch { bluetoothFlow(ctx).collect { b -> _state.update { it.copy(bluetooth = b) } } }
+    }
+
+    fun refreshApps() { viewModelScope.launch { resolved.value = AppCatalog.resolve(ctx) } }
+
+    /** Idempotente: se llama al abrir y tras responder los permisos. */
+    fun startSensors() {
+        if (sensorJobs.any { it.isActive }) return
+        if (!ctx.hasPerm(Manifest.permission.ACCESS_FINE_LOCATION)) return
+        sensorJobs = listOf(viewModelScope.launch {
+            locationFlow(ctx).catch { }.collect { loc ->
+                lastLoc = loc
+                lastFix = System.currentTimeMillis()
+                val kmh = if (loc.hasSpeed()) (loc.speed * 3.6f).toInt() else 0
+                val p = prev
+                val add = if (p != null && kmh > 1) p.distanceTo(loc) / 1000.0 else 0.0
+                prev = loc
+                _state.update { it.copy(speedKmh = kmh, tripKm = it.tripKm + add) }
+            }
+        })
+    }
+
+    fun toggleEdit() = _state.update { it.copy(editMode = !it.editMode) }
+
+    fun moveEarlier(id: String) = viewModelScope.launch {
+        val list = dao.observe().first().toMutableList()
+        val i = list.indexOfFirst { it.id == id }
+        if (i > 0) {
+            val t = list[i]; list[i] = list[i - 1]; list[i - 1] = t
+            dao.upsertAll(list.mapIndexed { idx, p -> p.copy(position = idx) })
+        }
+    }
+
+    fun toggleVisible(id: String) = viewModelScope.launch {
+        val list = dao.observe().first()
+        dao.upsertAll(list.map { if (it.id == id) it.copy(visible = !it.visible) else it })
+    }
+}
